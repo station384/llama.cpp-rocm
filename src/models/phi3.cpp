@@ -58,14 +58,14 @@ void llama_model_phi3::load_arch_tensors(llama_model_loader &) {
 
 std::unique_ptr<llm_graph_context> llama_model_phi3::build_arch_graph(const llm_graph_params & params) const {
     if (hparams.swa_type != LLAMA_SWA_TYPE_NONE) {
-        return std::make_unique<graph<true>> (params);
+        return std::make_unique<graph<true>> (*this, params);
     } else {
-        return std::make_unique<graph<false>>(params);
+        return std::make_unique<graph<false>>(*this, params);
     }
 }
 
 template<bool iswa>
-llama_model_phi3::graph<iswa>::graph(const llm_graph_params & params) : llm_graph_context(params) {
+llama_model_phi3::graph<iswa>::graph(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
     const int64_t n_embd_head = hparams.n_embd_head_v();
 
     GGML_ASSERT(n_embd_head == hparams.n_embd_head_k());
@@ -93,6 +93,8 @@ llama_model_phi3::graph<iswa>::graph(const llm_graph_params & params) : llm_grap
 
         // self-attention
         {
+            // rope freq factors for 128k context
+            ggml_tensor * rope_factors = model.get_rope_factors(cparams, il);
 
             ggml_tensor* attn_norm_output = build_norm(inpL,
                     model.layers[il].attn_norm,
@@ -102,8 +104,17 @@ llama_model_phi3::graph<iswa>::graph(const llm_graph_params & params) : llm_grap
 
             auto [Qcur, Kcur, Vcur] = build_qkv(model.layers[il], attn_norm_output,
                     n_embd_head, n_head, n_head_kv, il);
-            Qcur = build_rope(Qcur, inp_pos, il);
-            Kcur = build_rope(Kcur, inp_pos, il);
+            Qcur = ggml_rope_ext(
+                    ctx0, Qcur, inp_pos, rope_factors,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
+
+            Kcur = ggml_rope_ext(
+                    ctx0, Kcur, inp_pos, rope_factors,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
 
             cb(Qcur, "Qcur", il);
             cb(Kcur, "Kcur", il);

@@ -63,11 +63,3 @@ export enum ColorLevel {
 	OK = 'ok',
 	WARNING = 'warning'
 }
-
-/**
- * Which menu an item's actions render in.
- */
-export enum MenuKind {
-	CONTEXT = 'context',
-	DROPDOWN = 'dropdown'
-}

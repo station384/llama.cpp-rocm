@@ -51,11 +51,11 @@ void llama_model_qwen3::load_arch_tensors(llama_model_loader &) {
 }
 
 std::unique_ptr<llm_graph_context> llama_model_qwen3::build_arch_graph(const llm_graph_params & params) const {
-    return std::make_unique<graph>(params);
+    return std::make_unique<graph>(*this, params);
 }
 
-llama_model_qwen3::graph::graph(const llm_graph_params & params) : llm_graph_context(params) {
-    ggml_tensor * cur = build_backbone();
+llama_model_qwen3::graph::graph(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
+    ggml_tensor * cur = build_backbone(model);
 
     // lm_head
     cur = build_lora_mm(model.output, cur, model.output_s);
@@ -64,7 +64,7 @@ llama_model_qwen3::graph::graph(const llm_graph_params & params) : llm_graph_con
     res->t_logits = cur;
 }
 
-ggml_tensor * llama_model_qwen3::graph::build_backbone() {
+ggml_tensor * llama_model_qwen3::graph::build_backbone(const llama_model & model) {
     const int64_t n_embd_head = hparams.n_embd_head_v();
 
     GGML_ASSERT(n_embd_head == hparams.n_embd_head_k());
@@ -102,12 +102,20 @@ ggml_tensor * llama_model_qwen3::graph::build_backbone() {
             Qcur = build_norm(Qcur, model.layers[il].attn_q_norm, NULL, LLM_NORM_RMS, il);
             cb(Qcur, "Qcur_normed", il);
 
-            Qcur = build_rope(Qcur, inp_pos, il);
+            Qcur = ggml_rope_ext(
+                    ctx0, Qcur, inp_pos, nullptr,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
 
             Kcur = build_norm(Kcur, model.layers[il].attn_k_norm, NULL, LLM_NORM_RMS, il);
             cb(Kcur, "Kcur_normed", il);
 
-            Kcur = build_rope(Kcur, inp_pos, il);
+            Kcur = ggml_rope_ext(
+                    ctx0, Kcur, inp_pos, nullptr,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
 
             cb(Qcur, "Qcur", il);
             cb(Kcur, "Kcur", il);

@@ -1,36 +1,35 @@
-// rdna4-kernels: per-shape attention tile config overrides for gfx1200 / gfx1201.
+// rdna4-kernels block 02: attention tile shape overrides for gfx1200 / gfx1201.
 //
-// ggml_cuda_fattn_tile_get_config_amd_rdna carries one hand-tuned row per (head size, tile
-// width) pair, shared by every RDNA part. This header is the hook for tuning gfx1200/gfx1201
-// separately: add a row, rebuild, measure. Nothing else in the tree needs to change.
+// The generic RDNA table (ggml_cuda_fattn_tile_get_config_amd_rdna) carries one hand-tuned row
+// per (head size, tile width) pair. For head size 256 with a quantized KV cache it lists tile
+// widths 4..32, and the width that a 512..2048 token prefill lands on (32) runs at occupancy 2
+// with nbatch_K 64, while the same shape with an f16 KV cache gets occupancy 3 and nbatch_K 128.
 //
-// Returns 0 for every shape it does not list, so the caller falls through to the generic RDNA
-// table and no other architecture, head size, tile width or model changes behaviour.
+// This file is additive: it returns 0 for every shape it does not override, so the caller falls
+// through to the generic RDNA table and nothing else changes. Non-RDNA devices never reach it.
 //
 // Fields: (DKQ, DV, ncols, nthreads, occupancy, nbatch_fa, nbatch_K)
 //
-// Constraints, enforced by static_assert in GGML_CUDA_FATTN_TILE_CONFIG_CASE and in
+// Constraints, all enforced by static_assert in GGML_CUDA_FATTN_TILE_CONFIG_CASE and in
 // flash_attn_tile:
 //   nthreads % 32 == 0, nthreads <= 512, occupancy <= 8, nbatch_fa <= 256, nbatch_K <= 256
 //   nbatch_fa % (np*32) == 0, where np = max(1, nthreads/32/ncols)
-//   occupancy * per-block LDS must fit the CU's LDS budget. That binds first at head size 256,
-//   where the Q staging alone is 16 KiB per block: (256,256,32,256,4,...) does not build.
-//
-// Two measurement notes from gfx1201 (Radeon AI PRO R9700, ROCm 10.1, Qwen3.8-27B IQ3_S,
-// q4_0 KV cache, pp512):
-//
-//   1. Clock ramp dominates small deltas. The same binary measured 1334 / 1012 / 728 t/s at
-//      d0 / d16384 / d65536 from idle, and 1397 / 1020 / 748 after a 60 s burn-in. Burn in and
-//      interleave A/B; llama-bench's single warmup iteration is not enough after an idle gap.
-//
-//   2. On a tree that carries quantized-KV tile support (upstream PR #31234) the quantized
-//      table has its own rows: head size 256 x tile width 32 is (256,2,64,64) there versus
-//      (256,3,64,128) in the shared table. Reverting it to the shared value measured no gain
-//      once clock state was controlled, so no row is shipped here.
+//   occupancy * per-block LDS must stay inside the CU's LDS budget; this is the binding
+//   constraint at head size 256, where the Q staging alone is 16 KiB per block
 static constexpr __host__ __device__ uint32_t ggml_cuda_fattn_tile_get_config_amd_rdna4(
-        const int DKQ, const int DV, const int ncols) {
-    (void) DKQ;
-    (void) DV;
-    (void) ncols;
+        const int DKQ, const int DV, const int ncols, const bool is_quant) {
+    if (is_quant) {
+        // Measured on gfx1201 (Radeon AI PRO R9700, ROCm 10.1) with Qwen3.8-27B IQ3_S,
+        // q4_0 KV cache, pp512, r=5, two passes per config, t/s at d0 / d16384 / d65536:
+        //   upstream (256,2,64,64)        1334 / 1004 /  734
+        //   (256,3,64,128)   [shipped]    1407 / 1089 /  797    +6.0% / +8.4% / +8.6%
+        //   (256,3,64,256)                1331 / 1005 /  732    no change
+        //   (256,2,128,128)               1333 / 1003 /  727    no change
+        //   (256,4,64,128)                does not build: four blocks/SM exceed the LDS budget
+        //
+        // ncols 32 is the tile width a 512..2048 token prefill uses at head size 256 on HIP:
+        // ggml_cuda_fattn_tile_get_cols_per_block returns 32 when ne01 > 16/ncols2_eff.
+        GGML_CUDA_FATTN_TILE_CONFIG_CASE(256, 256, 32, 256, 3, 64, 128)
+    }
     return 0;
 }

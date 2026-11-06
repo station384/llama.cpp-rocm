@@ -6,7 +6,6 @@
 		ChatMessageAssistantProcessingInfo,
 		ChatMessageAssistantRawOutput,
 		ChatMessageAssistantStatistics,
-		ChatMessageContextMenu,
 		ChatMessageEditForm
 	} from '$lib/components/app';
 	import { getChatMessageEditContext } from '$lib/contexts';
@@ -174,23 +173,16 @@
 	{#if editCtx.isEditing}
 		<ChatMessageEditForm />
 	{:else}
-		<ChatMessageContextMenu
-			disabled={!message.timestamp}
-			onContinue={currentConfig.enableContinueGeneration ? onContinue : undefined}
-			{onRegenerate}
-			role={MessageRole.ASSISTANT}
-		>
-			{#if showRawOutput}
-				<ChatMessageAssistantRawOutput {message} {toolMessages} />
-			{:else}
-				<ChatMessageAgenticContent
-					{isLastAssistantMessage}
-					isStreaming={chatStore.isStreaming()}
-					{message}
-					{toolMessages}
-				/>
-			{/if}
-		</ChatMessageContextMenu>
+		{#if showRawOutput}
+			<ChatMessageAssistantRawOutput {message} {toolMessages} />
+		{:else}
+			<ChatMessageAgenticContent
+				{isLastAssistantMessage}
+				isStreaming={chatStore.isStreaming()}
+				{message}
+				{toolMessages}
+			/>
+		{/if}
 	{/if}
 
 	{#if showProcessingInfoBottom}

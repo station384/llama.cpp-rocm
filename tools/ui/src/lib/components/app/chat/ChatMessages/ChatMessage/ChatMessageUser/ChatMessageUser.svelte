@@ -1,13 +1,12 @@
 <script lang="ts">
 	import {
 		ChatMessageActionIcons,
-		ChatMessageContextMenu,
 		ChatMessageEditForm,
 		ChatMessageStatistics,
 		ChatMessageUserBubble
 	} from '$lib/components/app/chat';
 	import { getChatMessageEditContext } from '$lib/contexts';
-	import { ChatMessageStatisticsMode, MessageRole } from '$lib/enums';
+	import { ChatMessageStatisticsMode } from '$lib/enums';
 	import { useProcessingState } from '$lib/hooks/use-processing-state.svelte';
 	import { chatStore, settingsStore } from '$lib/stores';
 
@@ -73,13 +72,11 @@
 	{#if editCtx.isEditing}
 		<ChatMessageEditForm />
 	{:else}
-		<ChatMessageContextMenu disabled={!message.timestamp} role={MessageRole.USER}>
-			<ChatMessageUserBubble
-				attachments={message.extra}
-				content={message.content}
-				renderMarkdown={true}
-			/>
-		</ChatMessageContextMenu>
+		<ChatMessageUserBubble
+			attachments={message.extra}
+			content={message.content}
+			renderMarkdown={true}
+		/>
 
 		{#if showStoredReadingStats}
 			<!-- Reading stats sourced from the assistant message that followed this turn -->

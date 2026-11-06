@@ -44,10 +44,10 @@ void llama_model_openelm::load_arch_tensors(llama_model_loader &) {
 }
 
 std::unique_ptr<llm_graph_context> llama_model_openelm::build_arch_graph(const llm_graph_params & params) const {
-    return std::make_unique<graph>(params);
+    return std::make_unique<graph>(*this, params);
 }
 
-llama_model_openelm::graph::graph(const llm_graph_params & params) : llm_graph_context(params) {
+llama_model_openelm::graph::graph(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
     const int64_t n_embd_head = hparams.n_embd_head_v();
 
     GGML_ASSERT(n_embd_head == hparams.n_embd_head_k());
@@ -103,8 +103,17 @@ llama_model_openelm::graph::graph(const llm_graph_params & params) : llm_graph_c
                     LLM_NORM_RMS, il);
             cb(Kcur, "Kcur", il);
 
-            Qcur = build_rope(Qcur, inp_pos, il);
-            Kcur = build_rope(Kcur, inp_pos, il);
+            Qcur = ggml_rope_ext(
+                    ctx0, Qcur, inp_pos, NULL,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
+
+            Kcur = ggml_rope_ext(
+                    ctx0, Kcur, inp_pos, NULL,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
 
             cb(Qcur, "Qcur", il);
             cb(Kcur, "Kcur", il);

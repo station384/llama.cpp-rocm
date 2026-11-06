@@ -34,8 +34,6 @@ struct ggml_backend_zdnn_device_context {
 
     size_t max_size;
 
-    int32_t n_threads;  // CPU threads
-
     char name[128];
 };
 

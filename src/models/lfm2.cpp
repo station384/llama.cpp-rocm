@@ -134,38 +134,28 @@ void llama_model_lfm2::load_arch_tensors(llama_model_loader &) {
     dense_2_out_layers_b = create_tensor(tn(LLM_TENSOR_DENSE_2_OUT, "bias"),   {hparams.n_embd_out()        }, TENSOR_NOT_REQUIRED);
 }
 
-llama_rope_params llama_model_lfm2::get_rope_params(const llama_cparams & cparams, int il) const {
-    auto res = llama_model::get_rope_params(cparams, il);
-
-    // the SWA layers use the global base and scale
-    res.freq_base  = cparams.rope_freq_base;
-    res.freq_scale = cparams.rope_freq_scale;
-
-    return res;
-}
-
 std::unique_ptr<llm_graph_context> llama_model_lfm2::build_arch_graph(const llm_graph_params & params) const {
     if (hparams.n_layer_decision > 0) {
-        return std::make_unique<graph_decision>(params);
+        return std::make_unique<graph_decision>(*this, params);
     }
     if (hparams.swa_type == LLAMA_SWA_TYPE_STANDARD) {
-        return std::make_unique<graph<true>>(params);
+        return std::make_unique<graph<true>>(*this, params);
     } else {
-        return std::make_unique<graph<false>>(params);
+        return std::make_unique<graph<false>>(*this, params);
     }
 }
 
 template <bool iswa>
-llama_model_lfm2::graph<iswa>::graph(const llm_graph_params & params) :
+llama_model_lfm2::graph<iswa>::graph(const llama_model & model, const llm_graph_params & params) :
     llm_build_lfm_base(params) {
     using inp_hybrid_type = std::conditional_t<iswa, llm_graph_input_mem_hybrid_iswa,  llm_graph_input_mem_hybrid>;
     using inp_attn_type   = std::conditional_t<iswa, llm_graph_input_attn_kv_iswa,     llm_graph_input_attn_kv>;
     using mem_hybrid_ctx  = std::conditional_t<iswa, llama_memory_hybrid_iswa_context, llama_memory_hybrid_context>;
 
-    auto build_attn_block = [this](ggml_tensor *   cur,
-                                   ggml_tensor *   inp_pos,
-                                   inp_attn_type * inp_attn,
-                                   int             il) -> ggml_tensor * {
+    auto build_attn_block = [&model, this](ggml_tensor *   cur,
+                                           ggml_tensor *   inp_pos,
+                                           inp_attn_type * inp_attn,
+                                           int             il) -> ggml_tensor * {
         GGML_ASSERT(hparams.n_embd_v_gqa(il) == hparams.n_embd_k_gqa(il));
         const auto n_embd_head = hparams.n_embd_head_v();
         const auto n_head_kv   = hparams.n_head_kv(il);
@@ -180,8 +170,10 @@ llama_model_lfm2::graph<iswa>::graph(const llm_graph_params & params) :
         cb(k, "model.layers.{}.self_attn.k_layernorm", il);
 
         // RoPE
-        q = build_rope(q, inp_pos, il);
-        k = build_rope(k, inp_pos, il);
+        q = ggml_rope_ext(ctx0, q, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale, ext_factor,
+                          attn_factor, beta_fast, beta_slow);
+        k = ggml_rope_ext(ctx0, k, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale, ext_factor,
+                          attn_factor, beta_fast, beta_slow);
 
         cur = build_attn(inp_attn,
                 model.layers[il].wo, NULL, model.layers[il].wo_s,
@@ -218,7 +210,7 @@ llama_model_lfm2::graph<iswa>::graph(const llm_graph_params & params) :
 
         if (hparams.is_recr(il)) {
             const auto * mctx_recr = static_cast<const mem_hybrid_ctx *>(mctx)->get_recr();
-            cur = build_lfm_shortconv(mctx_recr, inp_hybrid->get_recr(), cur, il);
+            cur = build_lfm_shortconv(model, mctx_recr, inp_hybrid->get_recr(), cur, il);
         } else {
             cur = build_attn_block(cur, inp_pos, inp_hybrid->get_attn(), il);
         }
@@ -234,7 +226,7 @@ llama_model_lfm2::graph<iswa>::graph(const llm_graph_params & params) :
         cb(ffn_norm_out, "model.layers.{}.ffn_norm", il);
 
         ggml_tensor * ffn_out =
-            is_moe_layer ? build_lfm_moe_ffn(ffn_norm_out, il) : build_lfm_dense_ffn(ffn_norm_out, il);
+            is_moe_layer ? build_lfm_moe_ffn(model, ffn_norm_out, il) : build_lfm_dense_ffn(model, ffn_norm_out, il);
         cb(ffn_norm_out, "model.layers.{}.ffn_out", il);
 
         cur = ggml_add(ctx0, cur, ffn_out);
@@ -289,11 +281,11 @@ public:
             }
         };
 
-        GGML_ASSERT(ggml_backend_buffer_is_host(self_attn_mask.raw->buffer));
-        if (self_attn_mask.raw->type == GGML_TYPE_F16) {
-            fill_mask((ggml_fp16_t *) self_attn_mask.raw->data, ggml_fp32_to_fp16(0.0f), ggml_fp32_to_fp16(-INFINITY));
+        GGML_ASSERT(ggml_backend_buffer_is_host(self_kq_mask->buffer));
+        if (self_kq_mask->type == GGML_TYPE_F16) {
+            fill_mask((ggml_fp16_t *) self_kq_mask->data, ggml_fp32_to_fp16(0.0f), ggml_fp32_to_fp16(-INFINITY));
         } else {
-            fill_mask((float *) self_attn_mask.raw->data, 0.0f, -INFINITY);
+            fill_mask((float *) self_kq_mask->data, 0.0f, -INFINITY);
         }
     }
 
@@ -322,7 +314,7 @@ public:
     ggml_tensor * right = nullptr; // F32 [1, n_tokens]
 };
 
-llama_model_lfm2::graph_decision::graph_decision(const llm_graph_params & params) :
+llama_model_lfm2::graph_decision::graph_decision(const llama_model & model, const llm_graph_params & params) :
     llm_graph_context(params) {
     const int64_t n_embd_head = hparams.n_embd_head_v();
     const int     n_layer_enc = n_layer - hparams.n_layer_decision;
@@ -338,8 +330,9 @@ llama_model_lfm2::graph_decision::graph_decision(const llm_graph_params & params
     llm_graph_input_attn_no_cache * inp_attn[2];
     for (bool is_head : {false, true}) {
         auto inp = std::make_unique<llm_graph_input_attn_media>(hparams, cparams, is_head);
-        inp->self_attn_mask.raw = ggml_new_tensor_4d(ctx0, type_mask, n_tokens, n_tokens, 1, 1);
-        ggml_set_input(inp->self_attn_mask.raw);
+        inp->self_kq_mask = ggml_new_tensor_4d(ctx0, type_mask, n_tokens, n_tokens, 1, 1);
+        ggml_set_input(inp->self_kq_mask);
+        inp->self_kq_mask_cnv = inp->self_kq_mask;
         inp_attn[is_head] = (llm_graph_input_attn_no_cache *) res->add_input(std::move(inp));
     }
 
@@ -392,8 +385,10 @@ llama_model_lfm2::graph_decision::graph_decision(const llm_graph_params & params
             q = build_norm(q, layer.attn_q_norm, NULL, LLM_NORM_RMS, il);
             k = build_norm(k, layer.attn_k_norm, NULL, LLM_NORM_RMS, il);
 
-            q = build_rope(q, inp_pos, il);
-            k = build_rope(k, inp_pos, il);
+            q = ggml_rope_ext(ctx0, q, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale, ext_factor,
+                              attn_factor, beta_fast, beta_slow);
+            k = ggml_rope_ext(ctx0, k, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale, ext_factor,
+                              attn_factor, beta_fast, beta_slow);
 
             cur = build_attn(inp_attn[0],
                     layer.wo, NULL, layer.wo_s,
@@ -405,9 +400,9 @@ llama_model_lfm2::graph_decision::graph_decision(const llm_graph_params & params
 
         ggml_tensor * ffn_out = build_norm(cur, layer.ffn_norm, NULL, LLM_NORM_RMS, il);
         ffn_out = build_ffn(ffn_out,
-                layer.ffn_up,   NULL, layer.ffn_up_s,
-                layer.ffn_gate, NULL, layer.ffn_gate_s,
-                layer.ffn_down, NULL, layer.ffn_down_s,
+                layer.ffn_up,   NULL, NULL,
+                layer.ffn_gate, NULL, NULL,
+                layer.ffn_down, NULL, NULL,
                 NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
 
         cur = ggml_add(ctx0, cur, ffn_out);
@@ -417,7 +412,7 @@ llama_model_lfm2::graph_decision::graph_decision(const llm_graph_params & params
     cur = build_norm(cur, model.output_norm, NULL, LLM_NORM_RMS, -1);
     cb(cur, "result_norm", -1);
 
-    cur = build_decision_head(cur, inp_attn[1], inp_out_ids);
+    cur = build_decision_head(model, cur, inp_attn[1], inp_out_ids);
 
     res->t_embd = cur;
     ggml_build_forward_expand(gf, cur);
@@ -425,6 +420,7 @@ llama_model_lfm2::graph_decision::graph_decision(const llm_graph_params & params
 
 // same as llama_model_modern_bert::graph::build_decision_head(), with the head counts of the head layers
 ggml_tensor * llama_model_lfm2::graph_decision::build_decision_head(
+        const llama_model & model,
         ggml_tensor * inp,
         llm_graph_input_attn_no_cache * inp_attn,
         ggml_tensor * inp_out_ids) {

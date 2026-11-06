@@ -46,11 +46,16 @@ common_chat_params common_chat_params_init_k2_horizon(const common_chat_template
     const std::string ARG_VAL_END   = "</ifm|arg_value>";
 
     data.thinking_start_tag = THINK_START;
-    data.thinking_end_tags  = { THINK_END };
+    // The model does not reliably pair its closer with the opener it was given: with
+    // reasoning_effort=medium the prompt opens <ifm|think_fast> and the model closes
+    // </ifm|think> (measured, 4/4 runs). Accept all three or the final answer is parsed
+    // as reasoning and content comes back empty.
+    data.thinking_end_tags  = { THINK_END, "</ifm|think>", "</ifm|think_fast>", "</ifm|think_faster>" };
 
     data.preserved_tokens = data.thinking_end_tags;
     data.preserved_tokens.insert(data.preserved_tokens.end(), {
-        THINK_START, SECTION_START, SECTION_END, CALL_START, CALL_END,
+        THINK_START, "<ifm|think>", "<ifm|think_fast>", "<ifm|think_faster>",
+        SECTION_START, SECTION_END, CALL_START, CALL_END,
         ARG_KEY, ARG_KEY_END, ARG_TYPE, ARG_TYPE_END, ARG_VAL, ARG_VAL_END,
     });
 

@@ -25,7 +25,7 @@
 #endif // GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_FEW_ROWS
 
 #ifdef GGML_CUDA_USE_CUB
-#    include <cub/cub.cuh>
+#    include "cub-compat.cuh"  // real CUB on CUDA, hipCUB shim on ROCm
 // DeviceTopK has a race condition before CCCL 3.4.3.
 // https://github.com/NVIDIA/cccl/pull/10627
 #    if (CCCL_MAJOR_VERSION > 3 || \

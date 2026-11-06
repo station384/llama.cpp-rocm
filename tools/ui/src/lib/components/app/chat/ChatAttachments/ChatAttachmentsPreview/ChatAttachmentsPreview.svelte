@@ -32,7 +32,6 @@
 		isImage: boolean;
 		isAudio: boolean;
 		isVideo: boolean;
-		isPdf: boolean;
 	}
 
 	interface Props {
@@ -59,7 +58,6 @@
 					...item,
 					isAudio: isAudioFile(item.attachment, item.uploadedFile),
 					isImage: isImageFile(item.attachment, item.uploadedFile),
-					isPdf: isPdfFile(item.attachment, item.uploadedFile),
 					isVideo: isVideoFile(item.attachment, item.uploadedFile)
 				})
 			)

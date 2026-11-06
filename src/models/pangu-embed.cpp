@@ -51,19 +51,11 @@ void llama_model_pangu_embed::load_arch_tensors(llama_model_loader &) {
     }
 }
 
-llama_rope_params llama_model_pangu_embed::get_rope_params(const llama_cparams & cparams, int il) const {
-    auto res = llama_model::get_rope_params(cparams, il);
-
-    res.factors = nullptr;
-
-    return res;
-}
-
 std::unique_ptr<llm_graph_context> llama_model_pangu_embed::build_arch_graph(const llm_graph_params & params) const {
-    return std::make_unique<graph>(params);
+    return std::make_unique<graph>(*this, params);
 }
 
-llama_model_pangu_embed::graph::graph(const llm_graph_params & params) : llm_graph_context(params) {
+llama_model_pangu_embed::graph::graph(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
     const int64_t n_embd_head = hparams.n_embd_head_v();
 
     GGML_ASSERT(n_embd_head == hparams.n_embd_head_k());
@@ -96,8 +88,16 @@ llama_model_pangu_embed::graph::graph(const llm_graph_params & params) : llm_gra
             auto [Qcur, Kcur, Vcur] = build_qkv(model.layers[il], cur,
                     n_embd_head, n_head, n_head_kv, il);
 
-            Qcur = build_rope(Qcur, inp_pos, il);
-            Kcur = build_rope(Kcur, inp_pos, il);
+            Qcur = ggml_rope_ext(
+                    ctx0, Qcur, inp_pos, nullptr,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
+
+            Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
 
             cb(Qcur, "Qcur", il);
             cb(Kcur, "Kcur", il);

@@ -106,22 +106,18 @@
 		{readonly}
 		width={imageWidth}
 	/>
-{:else if isPdfFile(item.attachment, item.uploadedFile) && item.preview}
-	{@const pageCount =
-		item.attachment?.type === AttachmentType.PDF ? (item.attachment.images?.length ?? 0) : 0}
-
-	<ChatAttachmentsListItemThumbnailImage
-		class="{layoutClasses} cursor-pointer {className} {scrollClasses}"
-		height={imageHeight}
+{:else if isPdfFile(item.attachment, item.uploadedFile)}
+	<ChatAttachmentsListItemThumbnailFile
+		attachment={item.attachment}
+		class="flex-shrink-0 cursor-pointer {className} {scrollClasses}"
 		id={item.id}
-		{imageClass}
-		label={pageCount > 0 ? `PDF, ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}` : 'PDF'}
 		name={item.name}
 		onRemove={onFileRemove}
 		onclick={() => onPreview?.(item)}
-		preview={item.preview}
 		{readonly}
-		width={imageWidth}
+		size={item.size}
+		textContent={item.textContent}
+		uploadedFile={item.uploadedFile}
 	/>
 {:else}
 	<ChatAttachmentsListItemThumbnailFile

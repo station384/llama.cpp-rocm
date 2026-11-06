@@ -81,7 +81,6 @@ describe('exec_shell_command streaming title', () => {
 
 	it('streams the partial command into the title with a cursor', async () => {
 		const { container } = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: messageWithArgs('{"command":"git sta'),
 			toolMessages: []
@@ -99,7 +98,6 @@ describe('exec_shell_command streaming title', () => {
 
 	it('drops the cursor once the args JSON is complete', async () => {
 		const screen = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: messageWithArgs('{"command":"git sta'),
 			toolMessages: []
@@ -110,7 +108,6 @@ describe('exec_shell_command streaming title', () => {
 		expect(hasCursor(screen.container)).toBe(true);
 
 		screen.rerender({
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: messageWithArgs('{"command":"git status"}'),
 			toolMessages: []
@@ -123,7 +120,6 @@ describe('exec_shell_command streaming title', () => {
 
 	it('switches the prompt from the conversation cwd to the persisted one', async () => {
 		const screen = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: messageWithArgs('{"command":"git status"}'),
 			toolMessages: []
@@ -135,7 +131,6 @@ describe('exec_shell_command streaming title', () => {
 
 		// Result message lands: its x-tool-cwd takes over the prompt.
 		screen.rerender({
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: messageWithArgs('{"command":"git status"}'),
 			toolMessages: [toolResultMessage('', '/other/dir')]
@@ -148,7 +143,6 @@ describe('exec_shell_command streaming title', () => {
 
 	it('shows the executing label only after the command finishes streaming', async () => {
 		const screen = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: messageWithArgs('{"command":"git sta'),
 			toolMessages: []
@@ -160,7 +154,6 @@ describe('exec_shell_command streaming title', () => {
 		expect(screen.container.textContent).not.toContain('Executing command...');
 
 		screen.rerender({
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: messageWithArgs('{"command":"git status"}'),
 			toolMessages: []
@@ -199,7 +192,6 @@ describe('exec_shell_command streaming title', () => {
 		conversationsStore.activeMessages = [messageWithArgs('')];
 
 		const screen = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: true,
 			isStreaming: true,
 			message: conversationsStore.activeMessages[0]!,
 			toolMessages: []
@@ -220,59 +212,5 @@ describe('exec_shell_command streaming title', () => {
 			expect(triggerText(screen.container)).toContain(args.slice('{"command":"'.length));
 			expect(hasCursor(screen.container)).toBe(true);
 		}
-	});
-});
-
-describe('exec_shell_command interrupted call', () => {
-	beforeEach(() => {
-		settingsStore.updateMultipleConfig({
-			[SETTINGS_KEYS.ALWAYS_SHOW_TOOL_CALL_CONTENT]: true,
-			[SETTINGS_KEYS.SHOW_TOOL_CALL_IN_PROGRESS]: true
-		});
-	});
-
-	it('marks a call without a result as interrupted once streaming stops', async () => {
-		const { container } = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: true,
-			isStreaming: false,
-			message: messageWithArgs('{"command":"git status"}'),
-			toolMessages: []
-		});
-
-		await tick();
-
-		expect(triggerText(container)).toContain('interrupted');
-		expect(container.textContent).toContain('Command interrupted');
-		expect(container.textContent).not.toContain('Executing command...');
-	});
-
-	it('marks a command stopped before any output as interrupted', async () => {
-		// exec_shell_command creates its result message before running, so a
-		// stop mid-run leaves an empty result rather than none.
-		const { container } = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: true,
-			isStreaming: false,
-			message: messageWithArgs('{"command":"sleep 40"}'),
-			toolMessages: [toolResultMessage('', CWD)]
-		});
-
-		await tick();
-
-		expect(triggerText(container)).toContain('interrupted');
-		expect(container.textContent).toContain('Command interrupted');
-	});
-
-	it('does not keep spinning in an earlier message while a newer reply streams', async () => {
-		const { container } = render(ChatMessageAgenticContent, {
-			isLastAssistantMessage: false,
-			isStreaming: true,
-			message: messageWithArgs('{"command":"git status"}'),
-			toolMessages: []
-		});
-
-		await tick();
-
-		expect(triggerText(container)).toContain('interrupted');
-		expect(container.textContent).not.toContain('Executing command...');
 	});
 });

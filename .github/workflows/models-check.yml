@@ -11,8 +11,7 @@ on:
       'tests/fusion/**',
       'tests/test-fusion.cpp',
       'tests/test-llama-archs.cpp',
-      'src/llama-graph*',
-      'src/llama-kv-cache*',
+      'src/llama-graph.cpp',
       'src/llama-model*',
       'src/models/**'
     ]
@@ -25,8 +24,7 @@ on:
       'tests/fusion/**',
       'tests/test-fusion.cpp',
       'tests/test-llama-archs.cpp',
-      'src/llama-graph*',
-      'src/llama-kv-cache*',
+      'src/llama-graph.cpp',
       'src/llama-model*',
       'src/models/**'
     ]
@@ -146,11 +144,6 @@ jobs:
         run: |
           rm -rf build-ci-models && mkdir -p build-ci-models
           ./build/bin/test-llama-archs -o build-ci-models
-
-      - name: Test KV shift
-        id: test_kv_shift
-        run: |
-          ./build/bin/test-llama-archs --kv-shift
 
       - name: Test fusion
         id: test_fusion
@@ -299,11 +292,6 @@ jobs:
       #   id: test_fusion
       #   run: |
       #     ./build/bin/test-fusion --models build-ci-models --device Vulkan0 --check tests/fusion/Vulkan.csv
-
-      - name: Test KV shift
-        id: test_kv_shift
-        run: |
-          ./build/bin/test-llama-archs --kv-shift
 
       - name: Test archs
         id: test_archs

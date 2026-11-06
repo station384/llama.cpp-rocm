@@ -114,10 +114,10 @@ void llama_model_arwkv7::load_arch_tensors(llama_model_loader &) {
 }
 
 std::unique_ptr<llm_graph_context> llama_model_arwkv7::build_arch_graph(const llm_graph_params & params) const {
-    return std::make_unique<graph>(params);
+    return std::make_unique<graph>(*this, params);
 }
 
-llama_model_arwkv7::graph::graph(const llm_graph_params & params) : llm_build_rwkv7_base(params) {
+llama_model_arwkv7::graph::graph(const llama_model & model, const llm_graph_params & params) : llm_build_rwkv7_base(model, params) {
     GGML_ASSERT(n_embd == hparams.n_embd_r());
 
     ggml_tensor * cur;

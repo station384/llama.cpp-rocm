@@ -140,8 +140,6 @@ export async function parseFilesToMessageExtras(
 					// Process PDF as images (only for vision models)
 					try {
 						const images = await convertPDFToImage(file.file);
-						// kept for the preview's Text view; the model only receives the images
-						const content = file.textContent ?? (await convertPDFToText(file.file).catch(() => ''));
 
 						// Show success toast for PDF image processing
 						toast.success(
@@ -153,7 +151,7 @@ export async function parseFilesToMessageExtras(
 
 						extras.push({
 							base64Data: base64Data,
-							content,
+							content: `PDF file with ${images.length} pages`,
 							images: images,
 							name: file.name,
 							processedAsImages: true,

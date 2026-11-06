@@ -86,7 +86,7 @@ void llama_model_hrm_text::load_arch_tensors(llama_model_loader &) {
 }
 
 std::unique_ptr<llm_graph_context> llama_model_hrm_text::build_arch_graph(const llm_graph_params & params) const {
-    return std::make_unique<graph>(params);
+    return std::make_unique<graph>(*this, params);
 }
 
 // one stack invocation: lps pre-norm decoder layers, then the parameterless final norm
@@ -114,10 +114,12 @@ ggml_tensor * llama_model_hrm_text::graph::build_stack(llm_graph_input_attn_kv *
 
             auto [Qcur, Kcur, Vcur] = build_qkv(layer, cur, n_embd_head_k, n_head, n_head_kv, s);
 
-            Qcur = build_rope(Qcur, inp_pos, il);
+            Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                                 ext_factor, attn_factor, beta_fast, beta_slow);
             cb(Qcur, "Qcur", s);
 
-            Kcur = build_rope(Kcur, inp_pos, il);
+            Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                                 ext_factor, attn_factor, beta_fast, beta_slow);
             cb(Kcur, "Kcur", s);
 
             cur = build_attn(inp_attn,
@@ -163,8 +165,9 @@ ggml_tensor * llama_model_hrm_text::graph::build_stack(llm_graph_input_attn_kv *
     return cur;
 }
 
-llama_model_hrm_text::graph::graph(const llm_graph_params & params) :
-    llm_graph_context(params) {
+llama_model_hrm_text::graph::graph(const llama_model & model, const llm_graph_params & params) :
+    llm_graph_context(params),
+    model(model) {
     ggml_tensor * cur;
 
     // {n_embd, n_tokens}, scaled by hparams.f_embedding_scale inside build_inp_embd

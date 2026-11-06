@@ -167,14 +167,8 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 			});
 		}
 
-		// only the built-in server loads on request, and only in router mode; a model
-		// that is already loading is only selected, not loaded a second time
-		if (
-			!onModelChange &&
-			isRouter &&
-			!modelsStore.isModelLoaded(option.model) &&
-			!modelsStore.isModelLoading(option.model)
-		) {
+		// only the built-in server loads on request, and only in router mode
+		if (!onModelChange && isRouter && !modelsStore.isModelLoaded(option.model)) {
 			isLoadingModel = true;
 
 			modelsStore.status
