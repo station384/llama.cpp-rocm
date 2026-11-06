@@ -2,6 +2,7 @@
 #include "mma.cuh"
 
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 
@@ -390,6 +391,8 @@ template <int C, int V, int BLOCKS = 1> bool init(int device) {
     std::call_once(once[device], [device] {
         ggml_cuda_set_device(device);
         if (sizeof(shared<C, V>) > ggml_cuda_info().devices[device].smpbo) {
+            fprintf(stderr, "%s: GDN MMA needs %zu KiB LDS, device allows %zu KiB, sequential path used\n",
+                    __func__, sizeof(shared<C, V>) / 1024, (size_t) ggml_cuda_info().devices[device].smpbo / 1024);
             return;
         }
         const auto status = cudaFuncSetAttribute((const void *) gdn_single<C, V, BLOCKS>,
@@ -486,5 +489,23 @@ bool ggml_cuda_gdn_mma_launch(int device, const ggml_cuda_gdn_mma_args & a, cuda
     }
 #endif // GGML_USE_HIP
     CUDA_CHECK(cudaGetLastError());
+
+    // Surface a device-side trap at the launch site. Without this, a kernel that traps leaves
+    // the stream permanently unable to retire and the next synchronisation waits forever,
+    // which looks like an idle GPU with the host spinning. The first launch per device is
+    // always synchronised; GGML_RDNA4_GDN_SYNC=1 synchronises every launch.
+    static bool first_launch_done[GGML_CUDA_MAX_DEVICES] = {};
+    static const bool sync_always = []() {
+        const char * env = getenv("GGML_RDNA4_GDN_SYNC");
+        return env != nullptr && atoi(env) != 0;
+    }();
+    if (device >= 0 && device < GGML_CUDA_MAX_DEVICES && (!first_launch_done[device] || sync_always)) {
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!first_launch_done[device]) {
+            first_launch_done[device] = true;
+            fprintf(stderr, "%s: first GDN MMA launch on device %d retired cleanly (n_tokens = %d)\n",
+                    __func__, device, (int) a.n_tokens);
+        }
+    }
     return true;
 }
