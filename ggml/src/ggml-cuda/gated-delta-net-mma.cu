@@ -349,7 +349,10 @@ static __global__ __launch_bounds__(256, BLOCKS) void gdn_single(ggml_cuda_gdn_m
             }
         }
         // S = decay(chunk) * S + K^T * (solved * decay to chunk end)
-        for (int i = tid; i < C * V; i += 256) {
+        // Only the rows that were actually computed: rows >= valid have no token and
+        // s.prefix[] is not initialised for them, so scaling by expf(garbage) injected
+        // inf/NaN into the recurrent state on any chunk with a partial tail.
+        for (int i = tid; i < valid * V; i += 256) {
             const int   t = i / V, v = i % V, j = s.scratch.solved.index(t, v);
             const float x = __bfloat162float(s.scratch.solved.hi[j]) + __bfloat162float(s.scratch.solved.lo[j]);
             s.delta.store(t, v, x * expf(s.prefix[valid - 1] - s.prefix[t]));
