@@ -2,7 +2,16 @@
 #include "mma.cuh"
 
 #include <climits>
+#include <cstdlib>
 #include <mutex>
+
+// rdna4-kernels block 01: allow the chunked GDN prefill MMA kernel on RDNA4 (gfx1200/gfx1201).
+// The kernel only needs bf16 16x16x16 MMA with the tile<16,16,float> / tile<16,8,bf16x2> shapes,
+// which mma.cuh already implements for gfx12 via __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12.
+// No new MMA code is added here, only the architecture gate.
+#if defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && (defined(RDNA3) || defined(RDNA4)))
+#define GGML_GDN_MMA_AVAILABLE
+#endif // GGML_GDN_MMA_AVAILABLE
 
 namespace ggml_cuda_gated_delta_net_mma {
 constexpr int D = 128;
@@ -56,7 +65,7 @@ template <int C, int V> struct alignas(128) shared {
     static __device__ __forceinline__ int lower_index(int r, int c) { return r * C + c; }
 };
 
-#if defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3))
+#ifdef GGML_GDN_MMA_AVAILABLE
 using namespace ggml_cuda_mma;
 #ifdef GGML_USE_HIP
 using acc    = tile<16, 16, float, DATA_LAYOUT_J_MAJOR>;
@@ -118,13 +127,13 @@ template <int R, int C> __device__ __forceinline__ void store(matrix<R, C> & m, 
     }
 #endif // GGML_USE_HIP
 }
-#endif // defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3))
+#endif // GGML_GDN_MMA_AVAILABLE
 
 // Each block owns V independent value columns and advances by C tokens.
 // Keep recurrent state in FP32; pack high/residual BF16 operands inside the block.
 template <int C, int V, int BLOCKS = 1>
 static __global__ __launch_bounds__(256, BLOCKS) void gdn_single(ggml_cuda_gdn_mma_args a) {
-#if defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3))
+#ifdef GGML_GDN_MMA_AVAILABLE
     static_assert(ggml_cuda_get_physical_warp_size() == 32, "GDN MMA requires 32-lane warps");
     constexpr int WARPS = 8;
 #ifdef GGML_USE_HIP
@@ -360,7 +369,7 @@ static __global__ __launch_bounds__(256, BLOCKS) void gdn_single(ggml_cuda_gdn_m
 #else
     GGML_UNUSED_VARS(a);
     NO_DEVICE_CODE;
-#endif // defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3))
+#endif // GGML_GDN_MMA_AVAILABLE
 }
 
 template <int C, int V, int BLOCKS = 1> bool init(int device) {
@@ -391,7 +400,33 @@ static gdn_path select_gdn_mma_path(int device, const ggml_cuda_gdn_mma_args & a
     }
     const auto & info = ggml_cuda_info().devices[device];
 #ifdef GGML_USE_HIP
-    if (!GGML_CUDA_CC_IS_RDNA3_5(info.cc) || a.n_tokens < 2048) {
+    // rdna4-kernels block 01: RDNA4 (gfx1200/gfx1201) uses the same slice64 schedule as RDNA3.5.
+    // Read once so a single binary can be A/B tested without a rebuild:
+    //   GGML_RDNA4_GDN=0                -> disable, fall back to the sequential kernel (upstream behaviour)
+    //   GGML_RDNA4_GDN_MIN_TOKENS=<int> -> prompt length that enables the path (default 512)
+    const bool is_rdna35 = GGML_CUDA_CC_IS_RDNA3_5(info.cc);
+    const bool is_rdna4  = GGML_CUDA_CC_IS_RDNA4(info.cc);
+    if (!is_rdna35 && !is_rdna4) {
+        return gdn_path::ar;
+    }
+    if (is_rdna4) {
+        // Off by default: on gfx12 the 128B WMMA consumes 8 bf16 per lane while this kernel's
+        // tile<16, 8, nv_bfloat162> operands are shaped for the 256B variant, so the fragment
+        // mapping is wrong and GATED_DELTA_NET fails with errors ~0.5..17 (45/45 pass with the
+        // path disabled). Opt in only when the operand layout has been ported and the test passes.
+        static const int rdna4_enabled = []() {
+            const char * env = getenv("GGML_RDNA4_GDN");
+            return (env != nullptr && atoi(env) == 1) ? 1 : 0;
+        }();
+        static const int rdna4_min_tokens = []() {
+            const char * env = getenv("GGML_RDNA4_GDN_MIN_TOKENS");
+            const int    v   = env != nullptr ? atoi(env) : 0;
+            return v > 0 ? v : 512;
+        }();
+        if (!rdna4_enabled || a.n_tokens < rdna4_min_tokens) {
+            return gdn_path::ar;
+        }
+    } else if (a.n_tokens < 2048) {
         return gdn_path::ar;
     }
     return init<16, 64>(device) ? gdn_path::slice64 : gdn_path::ar;
