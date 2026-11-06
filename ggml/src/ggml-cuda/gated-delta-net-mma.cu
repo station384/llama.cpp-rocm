@@ -425,10 +425,9 @@ static gdn_path select_gdn_mma_path(int device, const ggml_cuda_gdn_mma_args & a
         return gdn_path::ar;
     }
     if (is_rdna4) {
-        // Off by default: on gfx12 the 128B WMMA consumes 8 bf16 per lane while this kernel's
-        // tile<16, 8, nv_bfloat162> operands are shaped for the 256B variant, so the fragment
-        // mapping is wrong and GATED_DELTA_NET fails with errors ~0.5..17 (45/45 pass with the
-        // path disabled). Opt in only when the operand layout has been ported and the test passes.
+        // Opt-in. The gfx12 operand layout uses DATA_LAYOUT_I_MAJOR, so results are correct
+        // (GATED_DELTA_NET passes); the path stays opt-in until the driver-level failure under
+        // concurrent launches is resolved.
         static const int rdna4_enabled = []() {
             const char * env = getenv("GGML_RDNA4_GDN");
             return (env != nullptr && atoi(env) == 1) ? 1 : 0;
@@ -443,6 +442,16 @@ static gdn_path select_gdn_mma_path(int device, const ggml_cuda_gdn_mma_args & a
         }
     } else if (a.n_tokens < 2048) {
         return gdn_path::ar;
+    }
+    // GGML_RDNA4_GDN_SLICE=32 (default) selects the two-block V=32 schedule: less dynamic LDS
+    // per block and twice the grid, so it is less likely to be co-resident with another
+    // large-LDS kernel. GGML_RDNA4_GDN_SLICE=64 restores the previous schedule.
+    static const int slice_v = []() {
+        const char * env = getenv("GGML_RDNA4_GDN_SLICE");
+        return (env != nullptr && atoi(env) == 64) ? 64 : 32;
+    }();
+    if (slice_v == 32) {
+        return init<16, 32, 2>(device) ? gdn_path::slice32_two_blocks : gdn_path::ar;
     }
     return init<16, 64>(device) ? gdn_path::slice64 : gdn_path::ar;
 #elif defined(GGML_USE_MUSA)
@@ -478,7 +487,11 @@ bool ggml_cuda_gdn_mma_launch(int device, const ggml_cuda_gdn_mma_args & a, cuda
         return false;
     }
 #ifdef GGML_USE_HIP
-    gdn_single<16, 64><<<a.H * a.n_seqs * 2, dim3(32, 8), sizeof(shared<16, 64>), stream>>>(a);
+    if (path == gdn_path::slice32_two_blocks) {
+        gdn_single<16, 32, 2><<<a.H * a.n_seqs * 4, dim3(32, 8), sizeof(shared<16, 32>), stream>>>(a);
+    } else {
+        gdn_single<16, 64><<<a.H * a.n_seqs * 2, dim3(32, 8), sizeof(shared<16, 64>), stream>>>(a);
+    }
 #else
     if (path == gdn_path::slice32_two_blocks) {
         gdn_single<16, 32, 2><<<a.H * a.n_seqs * 4, dim3(32, 8), sizeof(shared<16, 32>), stream>>>(a);
