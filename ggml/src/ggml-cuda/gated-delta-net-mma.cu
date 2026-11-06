@@ -69,7 +69,16 @@ template <int C, int V> struct alignas(128) shared {
 using namespace ggml_cuda_mma;
 #ifdef GGML_USE_HIP
 using acc    = tile<16, 16, float, DATA_LAYOUT_J_MAJOR>;
+#if defined(AMD_WMMA_128B_AVAILABLE)
+// gfx12: the 128B WMMA takes 8 bf16 per lane, and mma.cuh documents I_MAJOR as the
+// operand layout for WMMA128 while I_MAJOR_MIRRORED is the RDNA3 256B layout.
+// With I_MAJOR, tile<16,8,nv_bfloat162> has ne = I*J/32 = 4 words (8 bf16) per lane and
+// get_j(l) = ne*(lane/16) + l, which is the mapping validated against a CPU reference on
+// gfx1201 (f16 and bf16 16x16x16, max error 2e-6).
+using a_tile = tile<16, 8, nv_bfloat162, DATA_LAYOUT_I_MAJOR>;
+#else
 using a_tile = tile<16, 8, nv_bfloat162, DATA_LAYOUT_I_MAJOR_MIRRORED>;
+#endif // AMD_WMMA_128B_AVAILABLE
 using b_tile = a_tile;
 #else
 using acc    = tile<16, 8, float>;
