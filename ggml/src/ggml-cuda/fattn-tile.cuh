@@ -312,8 +312,18 @@ static constexpr __host__ __device__ uint32_t ggml_cuda_fattn_tile_get_config_am
     return 0;
 }
 
+// rdna4-kernels: optional per-shape overrides for gfx1200/gfx1201, no-op unless a row is
+// added to the header. Returns 0 for unlisted shapes so the generic RDNA table decides.
+#include "fattn-tile-config-rdna4.cuh"
+
 static __host__ uint32_t ggml_cuda_fattn_tile_get_config(const int DKQ, const int DV, const int ncols, const int cc) {
     if (GGML_CUDA_CC_IS_AMD(cc)) {
+        if (GGML_CUDA_CC_IS_RDNA4(cc)) {
+            const uint32_t rdna4_config = ggml_cuda_fattn_tile_get_config_amd_rdna4(DKQ, DV, ncols);
+            if (rdna4_config != 0) {
+                return rdna4_config;
+            }
+        }
         if (GGML_CUDA_CC_IS_RDNA(cc)) {
             return ggml_cuda_fattn_tile_get_config_amd_rdna(DKQ, DV, ncols);
         }
@@ -325,8 +335,16 @@ static __host__ uint32_t ggml_cuda_fattn_tile_get_config(const int DKQ, const in
     return ggml_cuda_fattn_tile_get_config_nvidia_fp32(DKQ, DV, ncols);
 }
 
-static constexpr __device__ uint32_t ggml_cuda_fattn_tile_get_config(const int DKQ, const int DV, const int ncols) {
+static constexpr __host__ __device__ uint32_t ggml_cuda_fattn_tile_get_config(const int DKQ, const int DV, const int ncols) {
 #ifdef GGML_USE_HIP
+#ifdef RDNA4
+    {
+        const uint32_t rdna4_config = ggml_cuda_fattn_tile_get_config_amd_rdna4(DKQ, DV, ncols);
+        if (rdna4_config != 0) {
+            return rdna4_config;
+        }
+    }
+#endif // RDNA4
 #ifdef RDNA
     return ggml_cuda_fattn_tile_get_config_amd_rdna(DKQ, DV, ncols);
 #else
