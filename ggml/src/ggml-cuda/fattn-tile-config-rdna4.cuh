@@ -29,7 +29,8 @@ static constexpr __host__ __device__ uint32_t ggml_cuda_fattn_tile_get_config_am
         //
         // ncols 32 is the tile width a 512..2048 token prefill uses at head size 256 on HIP:
         // ggml_cuda_fattn_tile_get_cols_per_block returns 32 when ne01 > 16/ncols2_eff.
-        GGML_CUDA_FATTN_TILE_CONFIG_CASE(256, 256, 32, 256, 3, 64, 128)
+        // disabled for measurement: this overrode #31234's (256,256,32,256,2,64,64)
+        // GGML_CUDA_FATTN_TILE_CONFIG_CASE(256, 256, 32, 256, 3, 64, 128)
     }
     return 0;
 }
