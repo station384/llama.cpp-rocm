@@ -428,7 +428,7 @@ static gdn_path select_gdn_mma_path(int device, const ggml_cuda_gdn_mma_args & a
         // path disabled). Opt in only when the operand layout has been ported and the test passes.
         static const int rdna4_enabled = []() {
             const char * env = getenv("GGML_RDNA4_GDN");
-            return (env != nullptr && atoi(env) == 0) ? 0 : 1;
+            return (env != nullptr && atoi(env) == 1) ? 1 : 0;
         }();
         static const int rdna4_min_tokens = []() {
             const char * env = getenv("GGML_RDNA4_GDN_MIN_TOKENS");
