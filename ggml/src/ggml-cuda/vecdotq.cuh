@@ -1284,7 +1284,11 @@ static __device__ __forceinline__ float vec_dot_iq3_s_q8_1(
     const int       signs_packed_32 = get_int_b2(bq3->signs, iqs/2);
     const uint8_t * signs_packed_8  = (const uint8_t *) &signs_packed_32;
 
-    int sumi = 0;
+    // four independent accumulator chains: the dp4a sequence is 8 deep otherwise
+    int sumi0 = 0;
+    int sumi1 = 0;
+    int sumi2 = 0;
+    int sumi3 = 0;
 #pragma unroll
     for (int l0 = 0; l0 < 8; l0 += 2) {
         const int2 grid_pos = make_int2(
@@ -1300,10 +1304,16 @@ static __device__ __forceinline__ float vec_dot_iq3_s_q8_1(
         const int u0 = get_int_b4(bq8_1[iqs/2].qs, l0 + 0);
         const int u1 = get_int_b4(bq8_1[iqs/2].qs, l0 + 1);
 
-        sumi = ggml_cuda_dp4a(grid_l, u0, sumi);
-        sumi = ggml_cuda_dp4a(grid_h, u1, sumi);
+        if (l0 & 2) {
+            sumi0 = ggml_cuda_dp4a(grid_l, u0, sumi0);
+            sumi1 = ggml_cuda_dp4a(grid_h, u1, sumi1);
+        } else {
+            sumi2 = ggml_cuda_dp4a(grid_l, u0, sumi2);
+            sumi3 = ggml_cuda_dp4a(grid_h, u1, sumi3);
+        }
     }
 
+    int sumi = (sumi0 + sumi1) + (sumi2 + sumi3);
     sumi *= 1 + 2*((bq3->scales[iqs/4] >> ((iqs << 1) & 0x04)) & 0x0F);
 
     const float d = __half2float(bq3->d) * __low2float(bq8_1[iqs/2].ds);
